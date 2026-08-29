@@ -245,7 +245,11 @@ disable_internal() {
 omarchy-hyprland-monitor-internal recover >/dev/null 2>&1 || true
 omarchy-hyprland-monitor-internal-mirror recover >/dev/null 2>&1 || true
 
-if omarchy-hw-clamshell && omarchy-hyprland-monitor-external-active; then
+# Personal policy change from stock Omarchy: prefer external over internal
+# whenever external is attached, regardless of lid state (dropped the
+# omarchy-hw-clamshell/lid-closed condition). Intentional local divergence,
+# not an upstream bug fix -- do not carry this into a PR.
+if omarchy-hyprland-monitor-external-active; then
   disable_internal
 else
   enable_internal
