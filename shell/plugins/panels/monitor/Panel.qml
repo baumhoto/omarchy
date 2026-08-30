@@ -300,13 +300,7 @@ Panel {
     if (!name) return
     if (enabled && root.enabledDisplayCount <= 1) return
 
-    // `hyprctl keyword monitor ...` no longer works against Hyprland's
-    // Lua-native config parser ("keyword can't work with non-legacy
-    // parsers"); use `hyprctl eval` against the hl.monitor() API instead.
-    var luaSpec = enabled
-      ? "hl.monitor({output=\"" + name + "\", disabled=true})"
-      : "hl.monitor({output=\"" + name + "\", disabled=false, mode=\"preferred\", position=\"auto\", scale=\"auto\"})"
-    actionProc.command = ["hyprctl", "eval", luaSpec]
+    actionProc.command = ["hyprctl", "keyword", "monitor", name + (enabled ? ",disable" : ",preferred,auto,auto")]
     if (!actionProc.running) actionProc.running = true
   }
 
