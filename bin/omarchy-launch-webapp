@@ -6,8 +6,19 @@
 browser=$(xdg-settings get default-web-browser)
 
 case $browser in
-google-chrome* | brave* | microsoft-edge* | opera* | vivaldi* | helium*) ;;
-*) browser="chromium.desktop" ;;
+google-chrome* | brave* | microsoft-edge* | opera* | vivaldi* | helium* | chromium*) ;;
+*)
+  # Fedora's chromium package ships chromium-browser.desktop, not
+  # chromium.desktop (Arch's naming) -- probe for whichever actually exists
+  # rather than assuming one distro's filename.
+  browser=""
+  for candidate in chromium.desktop chromium-browser.desktop; do
+    if [[ -f ~/.local/share/applications/$candidate || -f ~/.nix-profile/share/applications/$candidate || -f /usr/share/applications/$candidate ]]; then
+      browser="$candidate"
+      break
+    fi
+  done
+  ;;
 esac
 
 exec setsid uwsm-app -- $(sed -n 's/^Exec=\([^ ]*\).*/\1/p' {~/.local,~/.nix-profile,/usr}/share/applications/$browser 2>/dev/null | head -1) --app="$1" "${@:2}"
