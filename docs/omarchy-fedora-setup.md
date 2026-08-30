@@ -596,6 +596,26 @@ carrying it as a permanent local patch.
     Chromium process came up with `--app=https://youtube.com/` in its command line. Committed as
     `77f5de68`.
 
+20. **Alacritty wasn't following theme switches.** Checked Omarchy's real mechanism first (it does
+    work by design): `~/.omarchy/config/alacritty/alacritty.toml` (the actual seed) imports
+    `~/.local/state/omarchy/current/theme/alacritty.toml` — the per-theme staged file
+    `omarchy-theme-set` regenerates on every switch — and `omarchy-theme-set`'s
+    `post_theme_commands` already calls `omarchy-restart-terminal`, which `touch`es the config to
+    trigger Alacritty's own `live_config_reload`.
+
+    The gap: `~/.config/alacritty/alacritty.toml` was never actually the Omarchy seed — `config/`
+    was only copied for `hypr` back in Phase 1, and this machine already had a personal Alacritty
+    config from before any of this work, importing a static file from the third-party
+    `alacritty-theme` collection (`alacritty-theme/themes/pencil_light.toml`) instead.
+
+    Fixed surgically rather than reseeding the whole file (real personal customizations were
+    present — font, cursor style, tmux-as-default-shell, window position): changed just the
+    `import` line to `~/.local/state/omarchy/current/theme/alacritty.toml`, matching Omarchy's real
+    seed. Verified end-to-end, not just the config change: switched to `Tokyo Night` and confirmed
+    the staged file picked up its colors (`#1a1b26`/`#a9b1d6`), then back to `matte-black`
+    (`#121212`/`#bebebe`) — both via the real `omarchy-theme-set` flow, which also re-triggers
+    `omarchy-restart-terminal` automatically each time.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
