@@ -714,6 +714,47 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     checkout edits — the best available option given Omarchy's actual tooling, not a shortcut we
     took.
 
+23. **Unplugging the external monitor left the internal panel black** — a real bug in the "prefer
+    external" customization from issue 14, and likely a genuine upstream deadlock too (not
+    Fedora-specific — nothing here depends on anything Fedora-side).
+
+    Confirmed the exact mechanism with live, controlled reproduction rather than guessing:
+    - Plugging external in correctly disabled `eDP-1` (issue 14's fix working as intended).
+    - Unplugging left `eDP-1` disabled — but crucially, polled `hyprctl monitors all -j` every
+      second across a live disconnect and watched Hyprland create a synthetic **`FALLBACK`**
+      output (its built-in fallback for "zero real enabled outputs") the moment the real external
+      vanished, and `eDP-1` stayed disabled for 16+ seconds after — well past the watcher's own
+      1s/3s/7s retry schedule.
+    - Manually re-ran [`bin/omarchy-hyprland-monitor-clamshell`](bin/omarchy-hyprland-monitor-clamshell)
+      in that exact confirmed state with `bash -x`: it called `disable_internal()` again, not
+      `enable_internal()` — even though no real external monitor existed.
+
+    Root cause isolated to [`bin/omarchy-hyprland-monitor-external-active`](bin/omarchy-hyprland-monitor-external-active):
+    ```bash
+    hyprctl monitors all -j | jq -e '.[] | select(.name | test("^(eDP|LVDS|DSI)-") | not) | select(.disabled == false)'
+    ```
+    `FALLBACK` doesn't match the internal-panel name pattern and isn't itself disabled, so this
+    counted Hyprland's own placeholder as "an active external monitor" — a deadlock: real external
+    disconnects → `eDP-1` stays disabled → Hyprland spawns `FALLBACK` since there are zero real
+    outputs → this script sees `FALLBACK` and reports "external still active" → clamshell keeps
+    calling `disable_internal()` → `eDP-1` never recovers, permanently, until manual intervention.
+
+    Fixed by excluding `FALLBACK` explicitly from the query. Verified end-to-end with the same
+    controlled reproduction: polled through a live disconnect again post-fix, watched `eDP-1` stay
+    `disabled: false` (enabled) for the full window with **no `FALLBACK` needed at all this time**
+    — confirmed by the user unplugging for real. Committed as `4a27da36`. Direct checkout edit
+    (no clone mechanism exists for `bin/` scripts, per issue 22).
+
+    **Also found and fixed in passing**: two duplicate `omarchy-hyprland-monitor-watch` daemons were
+    running simultaneously (`pgrep` showed two PIDs, ~6 minutes apart in start time — plausibly from
+    something during this session's many lock/theme/reload cycles re-triggering Hyprland's
+    `hyprland.start` event, echoing the pattern in upstream issues like `#6995`/`#7749` about
+    idle/lock cycles re-triggering autostart-like behavior). Killed the stale one; the `flock -n`
+    in `sync_clamshell` means duplicates shouldn't cause *incorrect* behavior (only one can hold the
+    lock and run at a time), but it's still worth knowing this can happen — if monitor behavior
+    ever seems doubly-triggered or racy again, check `pgrep -af omarchy-hyprland-monitor-watch`
+    first.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
