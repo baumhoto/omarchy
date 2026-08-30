@@ -8,10 +8,16 @@ if [[ ${1:-} != "" && ${1:-} != "--active-state" ]]; then
   exit 1
 fi
 
-powerprofilesctl list 2>/dev/null |
-  awk -v with_state="${1:+1}" '/^\s*[* ]\s*[a-zA-Z0-9-]+:$/ {
-    active = ($1 == "*") ? 1 : 0
-    gsub(/^[*[:space:]]+|:$/, "")
-    print $0 (with_state ? "\t" active : "")
-  }' |
-  tac
+# Fedora note: talks to net.hadess.PowerProfiles over D-Bus directly rather
+# than shelling out to powerprofilesctl, which ships with power-profiles-daemon
+# -- installing that would fight tuned-ppd for the same D-Bus name. tuned-ppd
+# already implements this exact interface, so this works against either.
+active=$(busctl --json=short get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+  net.hadess.PowerProfiles ActiveProfile 2>/dev/null | jq -r '.data // empty')
+
+busctl --json=short get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+  net.hadess.PowerProfiles Profiles 2>/dev/null |
+  jq -r --arg active "$active" --arg with_state "${1:+1}" '
+    .data[]?.Profile.data as $p |
+    if $with_state == "1" then "\($p)\t\(if $p == $active then 1 else 0 end)" else $p end
+  '
