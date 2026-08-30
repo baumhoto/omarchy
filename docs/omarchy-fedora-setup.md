@@ -616,6 +616,38 @@ carrying it as a permanent local patch.
     (`#121212`/`#bebebe`) — both via the real `omarchy-theme-set` flow, which also re-triggers
     `omarchy-restart-terminal` automatically each time.
 
+21. **System lock works once, then silently does nothing on retry** — a real upstream Omarchy bug,
+    confirmed not Fedora-specific, closely related to (possibly the same root cause as) the open
+    issue [`omacom/omarchy#7072`](https://github.com/omacom/omarchy/issues/7072) ("WlSessionLock
+    reverted by compositor after ~4s"). **Security-relevant**: the IPC handler returns `"ok"` even
+    when it silently does nothing, so pressing lock again after this state is reached leaves the
+    screen genuinely unlocked while appearing to have succeeded.
+
+    Reproduced twice with genuine interactive use (not just headless testing): first
+    lock→unlock (password, then separately fingerprint) cycle works correctly end-to-end each
+    time; the *second* lock attempt afterward does nothing — no lock layer appears
+    (`hyprctl layers` shows only `omarchy-background`/`omarchy-bar`, no lock namespace).
+
+    Root cause traced precisely in [`shell/plugins/lock/Service.qml`](shell/plugins/lock/Service.qml):
+    ```qml
+    function lock(): string {
+      if (!root.passwordPamConfigured) return "missing-pam"
+      if (!root.locked && !root.beginLock()) return "failed"
+      return "ok"
+    }
+    ```
+    If `root.locked` is (wrongly) already `true`, `beginLock()` never runs and it still returns
+    `"ok"`. `locked` is a computed property (`lockRequested || sessionLock.locked ||
+    sessionLock.secure`) that should be fully reactive — but `omarchy-shell lock status` showed
+    `"locked":true` while **all three** of its own dependencies (`requested`, `sessionLocked`,
+    `secure`) independently read `false`, well after any transition had settled. That's a genuine
+    QML/Quickshell reactivity bug, not a simple stuck flag — not something fixable by re-reading
+    the source alone; would need live QML debugging to root-cause fully.
+
+    **Workaround for now**: `omarchy-restart-shell` resets all this runtime state cleanly (verified
+    — `locked` goes back to `false`, `lastEvent` back to `"init"`). Needed before any lock attempt
+    that follows a completed lock/unlock cycle.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
