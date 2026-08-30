@@ -3,4 +3,10 @@
 # omarchy:summary=Returns true when Hyprland has an active external monitor
 # omarchy:hidden=true
 
-hyprctl monitors all -j | jq -e '.[] | select(.name | test("^(eDP|LVDS|DSI)-") | not) | select(.disabled == false)' >/dev/null 2>&1
+# Excludes Hyprland's own "FALLBACK" synthetic output, which it creates
+# whenever zero real outputs are enabled (e.g. right after the last real
+# external monitor disconnects while the internal panel is still disabled
+# from clamshell mode). Without this exclusion, FALLBACK gets counted as an
+# active external monitor, so the internal panel never re-enables -- a
+# deadlock, since disable_internal() runs again instead of enable_internal().
+hyprctl monitors all -j | jq -e '.[] | select(.name | test("^(eDP|LVDS|DSI)-") | not) | select(.name != "FALLBACK") | select(.disabled == false)' >/dev/null 2>&1
