@@ -568,6 +568,34 @@ carrying it as a permanent local patch.
     `tuned-ppd`-style conflict there), not a bug — worth keeping as a local fork commit rather than
     proposing upstream.
 
+19. **Webapp keybindings broken** (`SUPER + SHIFT + Y` for YouTube, and every other `{webapp =
+    ...}` binding — Maps, Calendar, Email, ChatGPT, Grok, WhatsApp, Google Messages, Google
+    Photos). This is the actual root cause of the very first "App failure: Error: Path
+    '--app=https:/maps.google.com' does not exist!" notification from much earlier — never fully
+    traced at the time, now fully understood.
+
+    Traced through [`default/hypr/helpers.lua`](default/hypr/helpers.lua)'s `o.launch_webapp` →
+    [`bin/omarchy-launch-webapp`](bin/omarchy-launch-webapp) (both the plain and
+    `omarchy-launch-or-focus-webapp` focus-variant delegate to this one script). It resolves the
+    default browser via `xdg-settings get default-web-browser`, and if that's not one of a
+    hardcoded Chromium-family whitelist (`google-chrome*|brave*|microsoft-edge*|...`), falls back
+    to a **hardcoded** `chromium.desktop`. Confirmed by reproducing the exact failure by hand: our
+    default reports as `chromium-browser.desktop` — not in the whitelist — so it fell back to the
+    hardcoded name, which doesn't exist here (Fedora's `chromium` package ships
+    `chromium-browser.desktop`; `chromium.desktop` is Arch's naming). The `sed` extraction found
+    nothing, so `exec ... --app="$1"` ran with no binary before the flag — bash tried to execute
+    the literal string `--app=<url>` as a command, producing exactly the "Path ... does not exist"
+    notification.
+
+    Fixed in `bin/omarchy-launch-webapp`: added `chromium*` directly to the whitelist (covers our
+    actual default outright), and replaced the hardcoded fallback with a probe across both
+    possible filenames (`chromium.desktop`, `chromium-browser.desktop`) so it works regardless of
+    which distro's naming is present. Verified by reproducing the broken resolution by hand first
+    (confirmed empty command), then confirming the fixed logic resolves
+    `/usr/bin/chromium-browser` correctly, then actually launching YouTube end-to-end — a real
+    Chromium process came up with `--app=https://youtube.com/` in its command line. Committed as
+    `77f5de68`.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
