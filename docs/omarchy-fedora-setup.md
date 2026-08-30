@@ -755,6 +755,22 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     ever seems doubly-triggered or racy again, check `pgrep -af omarchy-hyprland-monitor-watch`
     first.
 
+24. **Set fixed per-output scaling**: internal (`eDP-1`) at `1.6`, external (`DP-1`) at `2` — a
+    preference, not a bug fix. Added specific `hl.monitor({output=..., scale=...})` rules to
+    `~/.config/hypr/monitors.lua` after the wildcard rule (which now stays `"auto"`, covering any
+    other monitor that might get plugged in later); Hyprland applies the more specific per-output
+    rule over the wildcard for a matching output. This also makes issue 23's clamshell re-enable
+    logic pick up `1.6` as `eDP-1`'s real configured scale (it reads the monitor-specific rule
+    first, falling back to the wildcard/remembered value only if none exists) — a fixed rule here
+    is the properly-supported way to pin scale per output, better than relying on the "remember
+    whatever was last active" fallback the clamshell script otherwise uses.
+
+    Verified `eDP-1` reads `scale: 1.6` via `hyprctl monitors -j` after reload. `DP-1` wasn't
+    connected at verification time to directly confirm `2`, but the rule is symmetric and applied
+    identically. `GDK_SCALE` didn't need to compromise between the two — both `1.6` and `2` round
+    to the same integer (`2`), which is the value GTK/X11 apps actually use (GDK_SCALE is
+    necessarily session-wide, not per-monitor).
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
