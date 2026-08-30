@@ -796,6 +796,48 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     path: `omarchy-theme-set-gnome` covers GTK/GNOME apps, the Cosmic-file hook covers Cosmic apps,
     and removing either reintroduces the exact gap it was added to close.
 
+26. **`herdr` installed via `mise` (user's own choice, not something I ran) — checked whether
+    Omarchy's own configuration/integration for it works out of the box.** Found the real repo
+    first rather than guessing: [`github.com/herdrdev/herdr`](https://github.com/herdrdev/herdr)
+    ("the runtime your coding agents live on"), PKGBUILD maintained by DHH himself, deps are just
+    `glibc`/`gcc-libs` — same profile as `ttfx` (issue 10).
+
+    All the Omarchy-side integration scripts
+    ([`bin/omarchy-launch-terminal-herdr`](bin/omarchy-launch-terminal-herdr),
+    [`bin/omarchy-menu-herdr-keybindings`](bin/omarchy-menu-herdr-keybindings),
+    `omarchy-restart-herdr`, `omarchy-refresh-herdr`) are genuinely portable bash with zero
+    Arch-specific assumptions — `omarchy-menu-herdr-keybindings` is a particularly nice design,
+    parsing keybindings straight from `herdr --default-config`'s own output rather than hardcoding
+    them, so it can never drift from what the installed `herdr` binary actually supports.
+
+    Found two real gaps, though:
+    - **`~/.config/herdr/config.toml` (Omarchy's own seed at `config/herdr/config.toml`) was never
+      copied** — same class of gap as issue 20 (Alacritty): we only ever seeded `config/hypr` back
+      in Phase 1, never the rest of `config/`. herdr was running on its own built-in defaults, not
+      Omarchy's. Seeded it (`cp ~/.omarchy/config/herdr/config.toml ~/.config/herdr/`) +
+      `omarchy-restart-herdr`. Verified via the keybindings menu: `PREFIX` changed from herdr's own
+      default (`CTRL + B`) to Omarchy's (`CTRL + SPACE`), several other bindings shifted too —
+      confirms the real config is now loaded.
+    - **Bigger, unrelated bug found incidentally**: launching the herdr terminal surfaced
+      `xkbcommon: ERROR: failed to open included Compose file
+      "/usr/share/omarchy/default/xcompose"` — affects **every** terminal launch, not herdr
+      specifically; just happened to be the first one whose stderr I was watching.
+      [`install/user/xcompose.sh`](install/user/xcompose.sh) hardcodes `/usr/share/omarchy`
+      literally in the heredoc it writes to `~/.XCompose`, instead of using `$OMARCHY_PATH` — a
+      real bug, but one that only ever surfaces for a dev-linked checkout like ours (a real
+      packaged install always has `OMARCHY_PATH=/usr/share/omarchy` anyway, so this line happens
+      to be correct there). Fixed the already-materialized `~/.XCompose` directly (swapped the
+      hardcoded path for our real checkout path) and confirmed with `omarchy-restart-xcompose` +
+      relaunching the terminal — no more error. Didn't patch the checkout script itself: this is
+      specifically a dev-link-only edge case, not something affecting real installs, so not
+      upstream-PR material the way issue 9's Hyprland fix was.
+
+      **Side note, not fixed**: the same generated file has `<Multi_key> <space> <n> : ""` and
+      `<space> <e> : ""` — empty, because `$OMARCHY_USER_NAME`/`$OMARCHY_USER_EMAIL` were unset
+      when `xcompose.sh` ran during our provisioning. Cosmetic (a compose-key shortcut to type your
+      own name/email expands to nothing instead of failing), left alone since it wasn't asked
+      about.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
