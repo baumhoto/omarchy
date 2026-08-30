@@ -565,8 +565,12 @@ carrying it as a permanent local patch.
     string tested standalone produces the correct three-column output. Committed as `5b23a55d`.
 
     This is a genuine Fedora-vs-Arch compatibility fix (Arch's `power-profiles-daemon` has no
-    `tuned-ppd`-style conflict there), not a bug — worth keeping as a local fork commit rather than
-    proposing upstream.
+    `tuned-ppd`-style conflict there), not a bug.
+
+    **Correction, see issue 22**: the `Menu.qml` part of this was initially committed as a direct
+    checkout edit — wrong, per Omarchy's own documented workflow. Moved to a proper plugin clone;
+    the `bin/omarchy-powerprofiles-*` script edits stay as checkout edits (no equivalent clone
+    mechanism exists for `bin/` commands).
 
 19. **Webapp keybindings broken** (`SUPER + SHIFT + Y` for YouTube, and every other `{webapp =
     ...}` binding — Maps, Calendar, Email, ChatGPT, Grok, WhatsApp, Google Messages, Google
@@ -647,6 +651,52 @@ carrying it as a permanent local patch.
     **Workaround for now**: `omarchy-restart-shell` resets all this runtime state cleanly (verified
     — `locked` goes back to `false`, `lastEvent` back to `"init"`). Needed before any lock attempt
     that follows a completed lock/unlock cycle.
+
+22. **Should have used `omarchy plugin clone`, not direct checkout edits, for local shell-plugin
+    customizations.** Flagged after watching the Quattro release video, which specifically calls
+    this out. Confirmed via [`shell/plugins/README.md`](shell/plugins/README.md) and
+    [`agents/skills/omarchy/plugins.md`](agents/skills/omarchy/plugins.md):
+
+    > "To customize a built-in bar widget, never edit `$OMARCHY_PATH/shell/plugins/`. Clone it into
+    > the user plugin directory instead: `omarchy plugin clone omarchy.workspaces`"
+
+    `omarchy-plugin-clone` copies a built-in plugin's full source into
+    `~/.config/omarchy/plugins/<username>.<id>/`, rewrites its manifest id (`clonedFrom` tracks the
+    original), and switches the shell to the clone in place of the built-in — a supported,
+    update-proof customization surface that lives entirely outside the git-tracked checkout.
+
+    **Applied to issue 18's `Menu.qml` power-profiles fix** (genuinely Fedora-specific, not
+    upstream material): `omarchy-plugin-clone omarchy.menu` — the clone inherited our fix
+    automatically since it copies from the checkout's then-current (already-patched) state.
+    Reverted `shell/plugins/menu/Menu.qml` back to byte-identical-with-upstream content afterward
+    (diffed against `upstream/quattro`, confirmed identical), and reconfirmed the power-profiles
+    script still works correctly through the clone. Now lives at
+    `~/.config/omarchy/plugins/tobi.menu/`, `omarchy-plugin-list --json` confirms `tobi.menu
+    enabled=true` / `omarchy.menu enabled=false`.
+
+    **Deliberately not applied to issue 9's `Panel.qml` fix** (the `hyprctl eval`/`hl.monitor` disable
+    fix) — that one is a genuine cross-distro Hyprland compatibility bug, not a personal
+    customization, and is meant to become a real upstream PR eventually. A plugin clone would work
+    locally but can't be the basis for a PR diff against the actual shipped file, so keeping it as
+    a direct checkout edit (already committed) is the right call specifically *because* it's
+    upstream-bound, not despite the clone-first guidance.
+
+    **Side discovery while investigating this**: `origin/quattro` (our fork) already matched our
+    locally-modified `Menu.qml` *before* this revert — meaning GitHub Desktop had already
+    successfully pushed our earlier commits (`5b23a55d` etc.) to the fork, silently succeeding
+    where this session's own `git push` attempts had failed for lack of credentials. Comparing
+    against the wrong remote (`origin` instead of `upstream`) would have shown a false "no diff"
+    and hidden the actual change needing reverting — worth remembering to diff against `upstream/*`
+    specifically when checking "is this really pristine," not `origin/*`.
+
+    **No equivalent mechanism exists for `bin/` script customizations** (checked: no
+    `omarchy-cmd-clone` or similar) — the `omarchy-powerprofiles-list`/`omarchy-powerprofiles-set`
+    edits from issue 18, and the `omarchy-launch-webapp` fix from issue 19, have no better home than
+    the checkout itself, since `$OMARCHY_PATH/bin` is prepended ahead of anything in `~/.local/bin`
+    (confirmed all the way back in issue 5's `udiskie` investigation), so a `~/.local/bin` shim
+    can't shadow an *existing* command the way it can supply a *missing* one. Those stay as direct
+    checkout edits — the best available option given Omarchy's actual tooling, not a shortcut we
+    took.
 
 ## Still deferred (per the plan, not bugs)
 
