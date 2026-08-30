@@ -494,6 +494,80 @@ carrying it as a permanent local patch.
   `vi`/`vim-minimal` doesn't support the Lua config, plugins, or LSP integration the real setup
   needs.
 
+17. **"Screen did not lock before suspend (No lock screen is configured)" notification.** Traced
+    through [`bin/omarchy-system-sleep-lock`](bin/omarchy-system-sleep-lock) → the shell IPC reply
+    `missing-pam` → [`shell/plugins/lock/Service.qml`](shell/plugins/lock/Service.qml): the lock
+    plugin requires `/etc/pam.d/omarchy-lock-password` to exist at all (watches the file path
+    directly), and separately checks for `/etc/pam.d/omarchy-lock-fingerprint` (gates the
+    fingerprint-unlock UI, requires both the file and an enrolled fingerprint via `fprintd-list`).
+    Neither existed — [`bin/omarchy-apply-lock`](bin/omarchy-apply-lock) (the real install-time
+    step that creates them) never ran, since we skipped the system-level install sequence.
+
+    **Checked first whether Cosmic already had this covered** (matching the udiskie/bt-agent
+    pattern) — it doesn't directly, but the check surfaced something better: Fedora's `authselect`
+    already has `with-fingerprint` enabled, and `system-auth` bundles `pam_fprintd.so` (sufficient)
+    and `pam_unix.so` (sufficient) in one stack. Omarchy's own PAM content (built for Arch) doesn't
+    just not need duplicating — it doesn't fully port: it references `account include
+    system-local-login`, a PAM service file Arch ships that **does not exist on Fedora** (confirmed
+    via `ls`). Fedora's actual equivalent is `system-auth`, which already gets both password and
+    fingerprint in one place.
+
+    Wrote both files with Fedora-native equivalents instead of the Arch original:
+    ```
+    /etc/pam.d/omarchy-lock-password:
+      auth       include      system-auth
+      account    include      system-auth
+
+    /etc/pam.d/omarchy-lock-fingerprint:
+      auth       required     pam_fprintd.so
+      account    include      system-auth
+    ```
+    (The password file alone already permits fingerprint-or-password since `system-auth` tries
+    `pam_fprintd.so` first — the fingerprint file is still worth having separately since the shell
+    specifically checks for its existence to decide whether to show a fingerprint prompt at all.)
+
+    Verified via the shell's own status query, not just file existence:
+    `omarchy-shell lock status` went from `"passwordPam":false,"fingerprint":false` to
+    `"passwordPam":true,"fingerprint":false` immediately after writing the files, then to
+    `"passwordPam":true,"fingerprint":true` after `omarchy-restart-shell` — the fingerprint flag
+    specifically needed a shell restart to pick up (checked once at shell startup, same pattern as
+    issue 13/Claude Desktop).
+
+18. **Battery widget's power-profiles menu listed nothing.** Traced to
+    [`shell/plugins/menu/Menu.qml:277`](shell/plugins/menu/Menu.qml)'s `power-profiles` entry: its
+    list script calls `powerprofilesctl get` and
+    [`bin/omarchy-powerprofiles-list`](bin/omarchy-powerprofiles-list) (which itself wraps
+    `powerprofilesctl list`) — that binary doesn't exist on this system, so both calls silently
+    fail (`2>/dev/null`) and the loop produces zero rows.
+
+    **Checked whether Cosmic already had this covered first** (same pattern as issues 5/7): power
+    profile switching does work under Cosmic, but not via `power-profiles-daemon` — Fedora ships
+    `tuned-ppd` instead, already installed and running, already registered on the exact
+    `net.hadess.PowerProfiles` D-Bus name `powerprofilesctl` talks to (confirmed via `busctl
+    --system list` and by reading `Profiles`/`ActiveProfile` directly — all three profiles and the
+    correct active one came back immediately, no gaps in the underlying plumbing at all).
+
+    So the fix isn't "install `power-profiles-daemon`" — doing that would install a second,
+    competing implementation of the same D-Bus service `tuned-ppd` already provides, fighting it
+    for the same bus name. Instead, **rewrote the three touch points to talk to
+    `net.hadess.PowerProfiles` directly via `busctl --json=short` + `jq`**, bypassing
+    `powerprofilesctl` entirely:
+    - `bin/omarchy-powerprofiles-list` — reads the `Profiles`/`ActiveProfile` properties directly
+    - `bin/omarchy-powerprofiles-set` — `busctl set-property ... ActiveProfile s "$profile"`
+      instead of `powerprofilesctl set`
+    - `shell/plugins/menu/Menu.qml:277` — same `ActiveProfile` read inline
+
+    Verified each in isolation before touching files (`busctl` read/write worked immediately,
+    including setting to `power-saver` and back to `balanced` cleanly), then verified all three
+    edited files end-to-end: `omarchy-powerprofiles-list` lists all three profiles with correct
+    active-state; `omarchy-powerprofiles-set battery power-saver` / `... ac balanced` both worked
+    and the invalid-profile rejection path still works unchanged; the exact `Menu.qml` script
+    string tested standalone produces the correct three-column output. Committed as `5b23a55d`.
+
+    This is a genuine Fedora-vs-Arch compatibility fix (Arch's `power-profiles-daemon` has no
+    `tuned-ppd`-style conflict there), not a bug — worth keeping as a local fork commit rather than
+    proposing upstream.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
