@@ -771,6 +771,31 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     to the same integer (`2`), which is the value GTK/X11 apps actually use (GDK_SCALE is
     necessarily session-wide, not per-monitor).
 
+25. **Claude Desktop showed the wrong theme after a real theme switch, even though the underlying
+    data was verified correct.** Update to issues 13/16 — same "app needs a restart to reconcile"
+    conclusion, but a different and more precise trigger identified.
+
+    Discovered along the way: [`bin/omarchy-theme-set-gnome`](bin/omarchy-theme-set-gnome) — an
+    existing, official Omarchy script, not something added this session — already independently
+    sets `org.gnome.desktop.interface color-scheme` directly via `gsettings set`, computed from
+    `omarchy-theme-color --file .../colors.toml mode`. This runs synchronously in
+    `omarchy-theme-set`'s `post_theme_commands`. Issue 16's hook (`cosmic-theme-mode.sh`) runs
+    separately afterward via `omarchy-hook theme-set`, writes only Cosmic's own file, and
+    `cosmic-settings-daemon` then reacts to *that* asynchronously, with its own delay, and also
+    ends up calling `gsettings set` on the same key. So a single theme switch now fires the same
+    `color-scheme` change twice, from two independent paths, close together in time.
+
+    Verified directly that both paths agreed on the correct final value (`catppuccin-latte` →
+    Cosmic file `false`, `gsettings get` → `'prefer-light'`, both confirmed via a real
+    `omarchy-theme-set` run, not a manual write) — yet Claude Desktop displayed dark regardless.
+    Confirmed this wasn't a transient/self-correcting race by checking again after the dust
+    settled: still wrong. **Fix is the same as issue 13**: quit and relaunch the app. Two
+    closely-timed signals for the same (correct, agreeing) value apparently can still leave the
+    app's internal theme state wrong — a robustness gap in Claude Desktop's own signal handling,
+    not something to fix from the Omarchy/Cosmic side. Deliberately not suppressing either write
+    path: `omarchy-theme-set-gnome` covers GTK/GNOME apps, the Cosmic-file hook covers Cosmic apps,
+    and removing either reintroduces the exact gap it was added to close.
+
 ## Still deferred (per the plan, not bugs)
 
 - `omarchy-pkg-*` pacman shims and anything gated behind them (`omarchy-install-*`, most
