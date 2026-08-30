@@ -327,6 +327,11 @@ git push origin quattro       # keep the fork in sync
 not Fedora-specific, worth opening a PR from the fork back to `omacom/omarchy` rather than
 carrying it as a permanent local patch.
 
+**Update, see issue 22**: the checkout itself was later reverted back to pristine (`09902660`) —
+the actual fix now lives in a proper plugin clone at `~/.config/omarchy/plugins/tobi.monitor/`,
+not as a live divergence in `~/.omarchy`. `ac84a440` stays in fork history purely as the source
+diff for a future PR; the checkout no longer carries it day-to-day.
+
 ## Two bugs found via theme-switch side effects (not Fedora-specific)
 
 11. **Monitor-disable state resets on theme switch.** Confirmed by reading the full code path,
@@ -674,12 +679,23 @@ carrying it as a permanent local patch.
     `~/.config/omarchy/plugins/tobi.menu/`, `omarchy-plugin-list --json` confirms `tobi.menu
     enabled=true` / `omarchy.menu enabled=false`.
 
-    **Deliberately not applied to issue 9's `Panel.qml` fix** (the `hyprctl eval`/`hl.monitor` disable
-    fix) — that one is a genuine cross-distro Hyprland compatibility bug, not a personal
-    customization, and is meant to become a real upstream PR eventually. A plugin clone would work
-    locally but can't be the basis for a PR diff against the actual shipped file, so keeping it as
-    a direct checkout edit (already committed) is the right call specifically *because* it's
-    upstream-bound, not despite the clone-first guidance.
+    **Correction**: initially planned to leave issue 9's `Panel.qml` fix (the `hyprctl
+    eval`/`hl.monitor` disable fix) as a direct checkout edit, reasoning that since it's meant to
+    become an upstream PR, a plugin clone couldn't be the basis for that diff. Wrong — cloning and
+    PR-ing aren't mutually exclusive, and there's a real, specific future collision a direct edit
+    doesn't protect against: when Omarchy eventually bumps its own Hyprland dependency past this
+    same "`hyprctl keyword` no longer works" point, upstream will fix this exact code themselves,
+    and our direct edit would conflict with their fix on the next `git pull`. A PR can be prepared
+    later by diffing this already-made commit against a fresh `upstream/quattro` checkout — that
+    never required the *live* checkout to carry the edit directly.
+
+    Applied the same clone-and-revert treatment: `omarchy-plugin-clone omarchy.monitor` (inherited
+    the fix automatically), reverted `shell/plugins/panels/monitor/Panel.qml` to byte-identical
+    upstream content, reconfirmed the `hl.monitor` disable/enable mechanism still works live. Now
+    lives at `~/.config/omarchy/plugins/tobi.monitor/`; `omarchy-plugin-list --json` confirms
+    `tobi.monitor enabled=true` / `omarchy.monitor enabled=false`. Checkout commit reverted; the
+    original fix commit (`ac84a440`) stays in fork history as the source to diff for the eventual
+    PR.
 
     **Side discovery while investigating this**: `origin/quattro` (our fork) already matched our
     locally-modified `Menu.qml` *before* this revert — meaning GitHub Desktop had already
