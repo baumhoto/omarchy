@@ -680,28 +680,48 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     responding correctly), not just the plugin catalog's `enabled` flag — which briefly still
     showed stale after re-enabling, until the restart actually completed.
 
-    **Automated the workaround, per user request.** Since restarting the shell is the only thing
-    confirmed to reliably work, and `omarchy-restart-shell` already blocks until the new shell
-    reports ready and refuses to run while the session is genuinely, securely locked (safe to call
-    unconditionally), added it as a prefix step directly in
-    [`bin/omarchy-system-lock`](bin/omarchy-system-lock):
-    ```bash
-    omarchy-restart-shell || true
-    omarchy-shell lock lock >/dev/null
-    ```
-    Verified: a full lock now takes ~1.15s (restart + lock, real-time measured) instead of
-    instant, but every lock gets a genuinely fresh session-lock connection rather than just the
-    first one — tested the exact previously-broken case (unlock, then immediately lock again) and
-    confirmed working. Committed as `11d9191c`, direct checkout edit (no clone mechanism for `bin/`
-    scripts, per issue 22).
+    **First attempt: automated the workaround in `omarchy-system-lock` — later reverted.** Since
+    restarting the shell is the only thing confirmed to reliably work, and `omarchy-restart-shell`
+    already blocks until ready and refuses to run while genuinely locked (safe to call
+    unconditionally), added it as a prefix step: `omarchy-restart-shell || true` before
+    `omarchy-shell lock lock`. Verified working for the manual-lock retry case (`11d9191c`), but
+    flagged a known limitation at the time: this only covered `omarchy-system-lock`, not other
+    paths that call the lock IPC directly.
 
-    **Known limitation, not addressed**: this only covers `omarchy-system-lock` — the manual
-    lock keybinding (`SUPER + CTRL + L`) and menu action. Other paths that call the lock IPC
-    directly (idle-triggered auto-lock via `omarchy.idle`, pre-suspend lock via
-    `omarchy-system-sleep-lock`) don't go through this script and would still be subject to the
-    same underlying bug if they hit it. Not fixed here — out of scope for what was asked, but worth
-    knowing if auto-lock-after-idle or lock-before-suspend ever silently fails to actually secure
-    the screen on a second occurrence.
+    **That limitation was hit almost immediately, for real**: the pre-suspend lock path
+    (`omarchy-system-sleep-lock`, a completely different script) doesn't go through
+    `omarchy-system-lock` at all, and suspend triggered "Screen did not lock before suspend" —
+    the exact same stuck-state bug, on the one path this fix didn't cover, on a security-critical
+    action. Confirmed via `omarchy-shell lock status` showing the identical broken signature
+    (`locked:true`, everything else `false`) left over from earlier testing.
+
+    **Considered extending the same fix to `omarchy-system-sleep-lock` — rejected the idea instead
+    of applying it blindly.** That script runs under a hard time budget derived from
+    `logind`'s `InhibitDelayMaxUSec` (confirmed `5000000` = 5s on this system, leaving roughly ~4s
+    after the script's own safety margin) before `logind` stops waiting and suspends regardless.
+    The restart costs ~1.15s — close to 30% of an already-tight, security-critical budget. Rather
+    than accept that risk, presented the tradeoff to the user instead of deciding it unilaterally.
+
+    **User's better idea, implemented instead: restart *after* unlock, not *before* lock.** Moves
+    the same ~1s cost to a moment with zero time pressure (right after a successful unlock,
+    instead of before a lock request), and fixes the state proactively — so
+    `omarchy-system-sleep-lock` benefits for free without touching that script or its tight budget
+    at all. Implemented in a proper clone (`omarchy-plugin-clone omarchy.lock` →
+    `~/.config/omarchy/plugins/tobi.lock/`), added to `finishUnlock()`:
+    ```qml
+    postUnlockRestartTimer.restart()  // 1500ms delay, then:
+    Process { id: postUnlockRestartProc; command: ["omarchy-restart-shell"] }
+    ```
+    The delay lets the unlock visuals settle before the brief restart flicker. Reverted the
+    now-superseded `omarchy-system-lock` change back to byte-identical upstream content
+    (`e1b0b713`) — no lock-time cost anywhere now, manual or pre-suspend, *if this holds up*.
+
+    **Status: implemented, not yet verified.** A lock was triggered and confirmed secure, but the
+    revert request came in before the unlock-and-retry test could run. Still need to confirm: (1)
+    the post-unlock restart actually fires ~1.5s after a real unlock, (2) a lock immediately after
+    that restart succeeds (the original retry case), and (3) idle-triggered auto-lock (via
+    `omarchy.idle`) benefits the same way, since it wasn't specifically tested either. Don't treat
+    this as done until those three are confirmed.
 
 22. **Should have used `omarchy plugin clone`, not direct checkout edits, for local shell-plugin
     customizations.** Flagged after watching the Quattro release video, which specifically calls
