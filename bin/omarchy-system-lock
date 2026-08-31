@@ -5,15 +5,6 @@
 # omarchy:name=lock
 # omarchy:examples=omarchy system lock
 
-# Workaround for a known lock-retry bug (see docs/omarchy-fedora-setup.md
-# issue 21): after one full lock/unlock cycle, the shell's lock state can get
-# stuck such that a second lock request silently no-ops while still reporting
-# "ok". omarchy-restart-shell gets a fresh WlSessionLock/ext-session-lock-v1
-# connection every time, which reliably clears it. It already blocks until
-# the new shell reports ready, and refuses to run at all if the session is
-# already securely locked, so this is safe to run unconditionally here.
-omarchy-restart-shell || true
-
 omarchy-shell lock lock >/dev/null
 
 # Set keyboard layout to default (first layout)
