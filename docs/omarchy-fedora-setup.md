@@ -716,12 +716,52 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     now-superseded `omarchy-system-lock` change back to byte-identical upstream content
     (`e1b0b713`) — no lock-time cost anywhere now, manual or pre-suspend, *if this holds up*.
 
-    **Status: implemented, not yet verified.** A lock was triggered and confirmed secure, but the
-    revert request came in before the unlock-and-retry test could run. Still need to confirm: (1)
-    the post-unlock restart actually fires ~1.5s after a real unlock, (2) a lock immediately after
-    that restart succeeds (the original retry case), and (3) idle-triggered auto-lock (via
-    `omarchy.idle`) benefits the same way, since it wasn't specifically tested either. Don't treat
-    this as done until those three are confirmed.
+    **Second bug found while verifying the above: the restart Process was a child of the shell it
+    kills, so it could kill itself mid-flight.** First live test looked promising — the shell
+    exited on schedule after unlock and a fresh instance came up — but a second lock/unlock cycle
+    left the desktop with **no shell running at all** (`omarchy-shell lock status` / `pgrep
+    quickshell` came back empty, `hyprctl layers` showed nothing). Journal showed the old instance
+    logging `Exiting due to IPC request.` with no subsequent `Launching config` ever appearing.
+
+    Root cause: `postUnlockRestartProc` was declared as a plain Quickshell `Process {}` item, which
+    is a child object of the very engine `omarchy-restart-shell` asks to exit
+    (`quickshell kill -p "$CONFIG_DIR" --any-display`, which blocks until that engine "has fully
+    exited"). Tearing down that engine destroys its QML object tree, including this `Process` item
+    — which kills its own child (the still-running `omarchy-restart-shell` script) before it can
+    reach the `hyprctl dispatch 'hl.dsp.exec_cmd("omarchy-launch-shell")'` line that spawns the
+    replacement. A genuine self-kill race: outcome depends on whether the dispatch call wins
+    against the parent engine's teardown. Explains the "worked once, then didn't" pattern exactly.
+
+    **Fix**: detach the restart invocation from Quickshell's process tree entirely, so tearing down
+    the dying engine can't take it down too:
+    ```qml
+    Process {
+      id: postUnlockRestartProc
+      command: ["systemd-run", "--user", "--collect", "--", "omarchy-restart-shell"]
+    }
+    ```
+    `systemd-run` hands the job to the systemd user manager as an independent transient unit
+    (`--collect` auto-removes it once done); even if Quickshell's teardown kills the immediate
+    `systemd-run` launcher process, the transient unit it already started keeps running under
+    systemd, decoupled from the dying engine.
+
+    One caveat hit while testing: Quickshell's file watcher is disabled
+    (`QS_DISABLE_FILE_WATCHER=1`, set by `omarchy-launch-shell`), and `omarchy-shell shell
+    rescanPlugins` only picks up added/removed plugin directories — it does **not** hot-reload
+    changed QML source in an already-loaded plugin. A running shell keeps executing the old
+    `Service.qml` until it's actually relaunched. Editing a plugin clone's QML and expecting the
+    live shell to pick it up needs an explicit `omarchy-restart-shell` run from outside Quickshell
+    (a terminal), not just a rescan.
+
+    **Status: verified.** After the `systemd-run` fix and a proper restart to load it, ran two full
+    interactive lock→unlock cycles back to back. Both showed the same clean pattern in the journal:
+    `systemd[...]: Started run-p*.service - [systemd-run] .../omarchy-restart-shell` → old instance
+    `Exiting due to IPC request.` → new instance `Launching config` → `Configuration Loaded`, all
+    within the same second, shell responsive (`omarchy-shell shell ping` → `ok`) immediately after
+    each cycle. The original retry bug (lock silently no-op on second attempt) has not recurred
+    across either cycle. Idle-triggered auto-lock (`omarchy.idle`) still wasn't specifically
+    exercised — the fix should cover it for free since it goes through the same `finishUnlock()`
+    path, but that path itself remains untested here.
 
 22. **Should have used `omarchy plugin clone`, not direct checkout edits, for local shell-plugin
     customizations.** Flagged after watching the Quattro release video, which specifically calls
