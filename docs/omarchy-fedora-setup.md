@@ -657,6 +657,34 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     — `locked` goes back to `false`, `lastEvent` back to `"init"`). Needed before any lock attempt
     that follows a completed lock/unlock cycle.
 
+    **Attempted fix, negative result — genuinely useful data point.** Tried cloning `omarchy.lock`
+    (`omarchy-plugin-clone omarchy.lock` → `~/.config/omarchy/plugins/tobi.lock/`) and changing the
+    IPC handler's `lock()` to read `lockRequested`/`sessionLock.locked`/`sessionLock.secure`
+    directly inline instead of through the `root.locked` computed property — reasoning that `||`
+    short-circuit evaluation could leave QML's dependency tracker never registering the later
+    operands, letting the binding go stale. Tested with a full real interactive cycle (password
+    unlock, then immediate re-lock attempt): **still failed identically**. This rules out
+    "stale QML binding dependency" as the mechanism — a fresh inline read inside a function body
+    can't go stale that way, so if it still failed, `lockRequested`/`sessionLock.locked`/`.secure`
+    themselves must genuinely be wrong on the second attempt, or the underlying
+    `ext-session-lock-v1` Wayland protocol object itself becomes unusable after one full
+    lock/unlock cycle. Strengthens rather than weakens the `#7072` connection — that issue
+    describes the compositor reverting `WlSessionLock` state on its own, which is exactly the
+    "the actual protocol object is broken, not the JS around it" shape this negative result points
+    to. `omarchy-restart-shell` "fixing" it isn't resetting JS state — it's establishing a *new*
+    protocol connection, which is why nothing short of a restart has worked.
+
+    Removed the ineffective clone afterward (`rm -rf ~/.config/omarchy/plugins/tobi.lock`,
+    `omarchy-plugin-enable omarchy.lock`, `omarchy-restart-shell`) and confirmed the built-in is
+    back to a clean working baseline via a real functional check (`omarchy-shell lock status`
+    responding correctly), not just the plugin catalog's `enabled` flag — which briefly still
+    showed stale after re-enabling, until the restart actually completed.
+
+    **Conclusion: no further fix attempted from this session.** This is very likely a genuine
+    Hyprland-side `ext-session-lock-v1` implementation bug, outside what Quickshell-side QML/JS
+    changes can address. `omarchy-restart-shell` before any second lock attempt remains the only
+    known reliable mitigation.
+
 22. **Should have used `omarchy plugin clone`, not direct checkout edits, for local shell-plugin
     customizations.** Flagged after watching the Quattro release video, which specifically calls
     this out. Confirmed via [`shell/plugins/README.md`](shell/plugins/README.md) and
