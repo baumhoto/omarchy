@@ -680,10 +680,28 @@ diff for a future PR; the checkout no longer carries it day-to-day.
     responding correctly), not just the plugin catalog's `enabled` flag — which briefly still
     showed stale after re-enabling, until the restart actually completed.
 
-    **Conclusion: no further fix attempted from this session.** This is very likely a genuine
-    Hyprland-side `ext-session-lock-v1` implementation bug, outside what Quickshell-side QML/JS
-    changes can address. `omarchy-restart-shell` before any second lock attempt remains the only
-    known reliable mitigation.
+    **Automated the workaround, per user request.** Since restarting the shell is the only thing
+    confirmed to reliably work, and `omarchy-restart-shell` already blocks until the new shell
+    reports ready and refuses to run while the session is genuinely, securely locked (safe to call
+    unconditionally), added it as a prefix step directly in
+    [`bin/omarchy-system-lock`](bin/omarchy-system-lock):
+    ```bash
+    omarchy-restart-shell || true
+    omarchy-shell lock lock >/dev/null
+    ```
+    Verified: a full lock now takes ~1.15s (restart + lock, real-time measured) instead of
+    instant, but every lock gets a genuinely fresh session-lock connection rather than just the
+    first one — tested the exact previously-broken case (unlock, then immediately lock again) and
+    confirmed working. Committed as `11d9191c`, direct checkout edit (no clone mechanism for `bin/`
+    scripts, per issue 22).
+
+    **Known limitation, not addressed**: this only covers `omarchy-system-lock` — the manual
+    lock keybinding (`SUPER + CTRL + L`) and menu action. Other paths that call the lock IPC
+    directly (idle-triggered auto-lock via `omarchy.idle`, pre-suspend lock via
+    `omarchy-system-sleep-lock`) don't go through this script and would still be subject to the
+    same underlying bug if they hit it. Not fixed here — out of scope for what was asked, but worth
+    knowing if auto-lock-after-idle or lock-before-suspend ever silently fails to actually secure
+    the screen on a second occurrence.
 
 22. **Should have used `omarchy plugin clone`, not direct checkout edits, for local shell-plugin
     customizations.** Flagged after watching the Quattro release video, which specifically calls
